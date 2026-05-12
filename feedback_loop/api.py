@@ -32,6 +32,12 @@ from feedback_loop.defaults import NUMBER_OF_SHOTS
 from utils.get_function_signature_from_prompt import get_function_signature_from_prompt
 from utils.read_jsonl import read_jsonl
 from utils.parse_response import parse_response
+from utils.coda_local import is_coda_model, send_coda_request
+from graders.qiskit_v2_specs import (
+    QISKIT_V2_JSONL,
+    QiskitV2Evaluator,
+    load_qiskit_v2_tasks,
+)
 
 from feedback_loop.defaults import (
     DEFAULT_MODELS,
@@ -57,11 +63,13 @@ from utils.common import get_handler
 load_dotenv()
 
 
-def get_jsonl_path(framework: str) -> str:
+def get_jsonl_path(framework: str, benchmark_version: str = "v1") -> str:
     if framework == "cirq":
         return CIRQ_JSONL
     if framework == "pennylane":
         return PENNYLANE_JSONL
+    if benchmark_version == "v2":
+        return str(QISKIT_V2_JSONL)
     return QISKIT_JSONL
 
 
@@ -96,6 +104,8 @@ def extract_assistant_text(raw: Dict[str, Any]) -> str:
 
 
 def send_request(request_payload: Dict[str, Any]) -> Dict[str, Any]:
+    if is_coda_model(request_payload.get("model")):
+        return send_coda_request(request_payload)
     api_key = os.getenv("API_KEY")
     if not api_key:
         raise RuntimeError("Missing API_KEY in environment.")
@@ -233,8 +243,36 @@ def evaluate_generated_code(
     framework: str,
     canonical_by_task,
     inputss=GLOBAL_INPUTS,
+    benchmark_version: str = "v1",
+    v2_evaluator: Optional[QiskitV2Evaluator] = None,
 ) -> "EvalResult":
     try:
+        if benchmark_version == "v2":
+            if framework != "qiskit" or v2_evaluator is None:
+                return EvalResult(
+                    compiled=True,
+                    ran=False,
+                    kl_div_bool=False,
+                    error="benchmark_version=v2 is currently implemented for qiskit only",
+                )
+            execution, grader_details = v2_evaluator.grade_code(
+                task_id=task_id,
+                code=code,
+                entry_point=entry_point,
+            )
+            metric = (
+                grader_details["kl_value"]
+                if "kl_value" in grader_details
+                else grader_details.get("metric")
+            )
+            return EvalResult(
+                compiled=True,
+                ran=True,
+                kl_div_result=metric,
+                kl_div_bool=bool(grader_details["passed"]),
+                output={"probabilities": execution.probabilities, "grader_details": grader_details},
+                error=None if grader_details["passed"] else json.dumps(grader_details)[:2000],
+            )
         match framework:
             case "cirq":
                 output = get_probs_cirq(
@@ -339,13 +377,14 @@ class TaskState:
     last_feedback: str = ""
 
 
-def build_task_states(jsonl_path: str, models: List[str]) -> List[TaskState]:
+def build_task_states(jsonl_path: str, models: List[str], benchmark_version: str = "v1") -> List[TaskState]:
     tasks = read_jsonl(jsonl_path)
     states: List[TaskState] = []
 
     for model in models:
         for task in tasks:
-            prompt = task.get("complete_prompt", "")
+            prompt = task.get("prompt_v2") if benchmark_version == "v2" else None
+            prompt = prompt or task.get("complete_prompt", "")
             sig = get_function_signature_from_prompt(prompt) or ""
             states.append(
                 TaskState(
@@ -478,7 +517,10 @@ def main(
     framework: str,
     feedback_num: int = 5,
     prefill: bool = False,
+    benchmark_version: str = "v1",
 ):
+    if benchmark_version == "v2" and framework != "qiskit":
+        raise ValueError("benchmark_version=v2 is currently implemented for qiskit only.")
     model_response_dir = get_model_responses_dir(framework=framework)
     model_response_dir.mkdir(parents=True, exist_ok=True)
     canonical_solutions = load_json_list(path=CANONICAL_SOLUTIONS_DIR)
@@ -495,11 +537,16 @@ def main(
         )
         attempt_records[m] = []
 
-    jsonl_path = get_jsonl_path(framework=framework)
-    states = build_task_states(jsonl_path, models)
+    jsonl_path = get_jsonl_path(framework=framework, benchmark_version=benchmark_version)
+    states = build_task_states(jsonl_path, models, benchmark_version=benchmark_version)
     print(f"🚀 Loaded {len(states)} model-task states ({len(models)} models x tasks).")
 
     global_inputs = load_global_inputs(framework)
+    v2_evaluator = (
+        QiskitV2Evaluator(load_qiskit_v2_tasks(QISKIT_V2_JSONL), global_inputs)
+        if benchmark_version == "v2"
+        else None
+    )
 
     for iteration in range(1, feedback_num + 1):
         pending = [
@@ -540,6 +587,8 @@ def main(
                 framework=framework,
                 canonical_by_task=canonical_by_task,
                 inputss=global_inputs,
+                benchmark_version=benchmark_version,
+                v2_evaluator=v2_evaluator,
             )
 
             feedback_to_model = ""
@@ -578,6 +627,7 @@ def main(
                     "output": None
                     if eval_res.output is None
                     else str(eval_res.output)[:2000],
+                    "benchmark_version": benchmark_version,
                 },
                 "feedback_sent_to_model": feedback_to_model or None,
             }
@@ -646,6 +696,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--feedback_num", type=int, default=5, help="Max attempts per task"
     )
+    parser.add_argument(
+        "--benchmark-version",
+        choices=["v1", "v2"],
+        default="v1",
+        help="Benchmark grader/prompt version (v2 currently qiskit only).",
+    )
     args = parser.parse_args()
 
     models = args.models if args.models else DEFAULT_MODELS
@@ -653,4 +709,5 @@ if __name__ == "__main__":
         models=models,
         framework=args.framework,
         feedback_num=args.feedback_num,
+        benchmark_version=args.benchmark_version,
     )

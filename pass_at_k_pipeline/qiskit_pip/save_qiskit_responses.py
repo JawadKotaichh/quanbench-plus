@@ -5,7 +5,12 @@ import json
 import traceback
 from pathlib import Path
 from pass_at_k_pipeline.defaults import NUMBER_OF_SHOTS
-from pass_at_k_pipeline.qiskit_pip.paths import MODEL_RESPONSES_DIR, QISKIT_JSONL
+from pass_at_k_pipeline.qiskit_pip.paths import (
+    MODEL_RESPONSES_DIR,
+    QISKIT_JSONL,
+    QISKIT_V2_JSONL,
+)
+from graders.qiskit_execution import execute_qiskit_task
 from utils.common import (
     _extract_token_fields,
     normalize_task_id,
@@ -102,6 +107,7 @@ def save_qiskit_responses(
     response_path: Path,
     output_dir: Path = Path("./model_results"),
     inputss=None,
+    benchmark_version: str = "v1",
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = response_path
@@ -111,7 +117,8 @@ def save_qiskit_responses(
     successes = []
 
     data = read_json(file)
-    prompts = load_prompts_jsonl_as_dict(Path(QISKIT_JSONL))
+    prompts_path = Path(QISKIT_V2_JSONL) if benchmark_version == "v2" else Path(QISKIT_JSONL)
+    prompts = load_prompts_jsonl_as_dict(prompts_path)
     if not data:
         print(f"⚠️ No data loaded from {file}")
         return [], None
@@ -128,21 +135,36 @@ def save_qiskit_responses(
             tid = normalize_task_id(raw_task_id)
             prompt_header = prompts.get(tid, {}).get("header", "")
             task["code"] = add_header_if_missing(task["code"], prompt_header)
-            output = get_probs(
-                raw_task_id,
-                task["code"],
-                task["entry_point"],
-                NUMBER_OF_SHOTS,
-                inputss,
-            )
+            if benchmark_version == "v2":
+                execution = execute_qiskit_task(
+                    task_id=tid,
+                    code=task["code"],
+                    entry_point=task["entry_point"],
+                    inputs=inputss,
+                )
+                output = execution.probabilities
+                execution_metadata = execution.metadata
+            else:
+                output = get_probs(
+                    raw_task_id,
+                    task["code"],
+                    task["entry_point"],
+                    NUMBER_OF_SHOTS,
+                    inputss,
+                )
+                execution_metadata = None
 
             outputs.append(
                 {
                     "task_id": raw_task_id,
+                    "entry_point": task.get("entry_point"),
                     "category": task.get("category"),
                     "version": task.get("version"),
                     **_extract_token_fields(task),
+                    "code": task.get("code"),
                     "output": _to_jsonable(output),
+                    "benchmark_version": benchmark_version,
+                    "execution_metadata": execution_metadata,
                 }
             )
             successes.append(raw_task_id)

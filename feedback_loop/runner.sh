@@ -1,5 +1,6 @@
 FEEDBACK_NUM=5
 FRAMEWORK="cirq"
+BENCHMARK_VERSION="v1"
 MODELS=()
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,6 +24,7 @@ print_help () {
   echo ""
   echo "  --framework, --lang    One of: cirq | qiskit | pennylane   (default: cirq)"
   echo "  --feedback_num         Max attempts per task (default: 5)"
+  echo "  --benchmark-version    One of: v1 | v2 (v2 currently qiskit only; default: v1)"
   echo ""
   echo "Examples:"
    echo "  bash $(basename "$0") --framework cirq --feedback_num 5 deepseek/deepseek-r1"
@@ -39,6 +41,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --framework|--lang)
       FRAMEWORK="$2"
+      shift 2
+      ;;
+    --benchmark-version)
+      BENCHMARK_VERSION="$2"
       shift 2
       ;;
     -h|--help)
@@ -59,16 +65,22 @@ fi
 
 cd "$REPO_ROOT" || exit 1
 
+if [[ "$BENCHMARK_VERSION" == "v2" && "$FRAMEWORK" != "qiskit" ]]; then
+  echo "Error: benchmark-version v2 is currently implemented for qiskit only." >&2
+  exit 1
+fi
+
 echo "Configuration:"
 echo "  Framework: $FRAMEWORK"
 echo "  Feedback attempts: $FEEDBACK_NUM"
+echo "  Benchmark version: $BENCHMARK_VERSION"
 echo "  Models:"
 for m in "${MODELS[@]}"; do
   echo "    - $m"
 done
 echo "---"
 
-ARGS=( --framework "$FRAMEWORK" --feedback_num "$FEEDBACK_NUM")
+ARGS=( --framework "$FRAMEWORK" --feedback_num "$FEEDBACK_NUM" --benchmark-version "$BENCHMARK_VERSION")
 "$PYTHON_BIN" "$API_SCRIPT" "${ARGS[@]}" "${MODELS[@]}"
 
 echo "---"

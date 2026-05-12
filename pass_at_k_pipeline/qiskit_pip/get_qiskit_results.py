@@ -6,6 +6,12 @@ import json
 import sys
 from utils.get_kl_div import get_kl_div
 from utils.get_canonical_results import GLOBAL_INPUTS
+from graders.core import GradeContext, grade
+from graders.qiskit_v2_specs import (
+    QiskitV2Evaluator,
+    load_qiskit_v2_tasks,
+    QISKIT_V2_JSONL,
+)
 from pass_at_k_pipeline.defaults import DEFAULT_MODELS
 from utils.evaluation_summary import print_evaluation_summary
 from pass_at_k_pipeline.qiskit_pip.paths import (
@@ -92,14 +98,18 @@ def main(
     result_path: Path,
     canonical_solutions_path: Path,
     global_inputs,
+    benchmark_version: str = "v1",
 ) -> List[Dict[str, Any]]:
     save_qiskit_responses(
         file=model_responses_path,
         response_path=response_path,
         inputss=global_inputs,
+        benchmark_version=benchmark_version,
     )
     model_responses = load_json_list(path=response_path)
     canonical_solutions = load_json_list(path=canonical_solutions_path)
+    v2_tasks = load_qiskit_v2_tasks(QISKIT_V2_JSONL) if benchmark_version == "v2" else {}
+    v2_evaluator = QiskitV2Evaluator(v2_tasks, global_inputs) if benchmark_version == "v2" else None
 
     canonical_by_task: Dict[str, Dict[str, Any]] = {
         str(sol["task_id"]): sol for sol in canonical_solutions
@@ -122,6 +132,7 @@ def main(
             "any_compiled": False,
             "any_passed": False,
             "canonical_output": "no canonical output",
+            "benchmark_version": benchmark_version,
             "versions": [],  # per-version details
         }
         if canonical is None:
@@ -190,12 +201,63 @@ def main(
                 record["versions"].append(vrec)
                 continue
 
-            kl_value, kl_bool = get_kl_div(
-                probs=model_probs,
-                expected_probs=canonical_probs,
-            )
+            grader_details = None
+            if benchmark_version == "v2":
+                if v2_evaluator is None:
+                    raise RuntimeError("v2 evaluator not initialized")
+                v2_task = v2_tasks.get(task_id)
+                if v2_task is None:
+                    vrec["error"] = "missing v2 canonical_class"
+                    record["versions"].append(vrec)
+                    continue
+                execution_metadata = resp.get("execution_metadata") or {}
+                unitary = None
+                target_unitary = None
+                # Response JSON stores only probabilities. Unit-only tasks are
+                # graded during response saving only when code is re-executed.
+                if v2_task["canonical_class"].get("comparison") == "unitary":
+                    try:
+                        execution, grader_details = v2_evaluator.grade_code(
+                            task_id=task_id,
+                            code=resp.get("code") or "",
+                            entry_point=resp.get("entry_point") or v2_task["entry_point"],
+                        )
+                        model_probs = execution.probabilities
+                    except Exception as exc:
+                        vrec["error"] = f"v2 grading failed: {type(exc).__name__}: {exc}"
+                        record["versions"].append(vrec)
+                        continue
+                else:
+                    canonical_execution = v2_evaluator._canonical_execution(task_id)
+                    grader_details = grade(
+                        v2_task["canonical_class"],
+                        GradeContext(
+                            probabilities=model_probs,
+                            canonical_probabilities=None
+                            if canonical_execution is None
+                            else canonical_execution.probabilities,
+                            candidate_unitary=unitary,
+                            target_unitary=target_unitary,
+                            metadata=execution_metadata,
+                            code=resp.get("code"),
+                        ),
+                    )
+                kl_value = (
+                    grader_details["kl_value"]
+                    if "kl_value" in grader_details
+                    else grader_details.get("metric")
+                )
+                kl_bool = bool(grader_details["passed"])
+                vrec["grader_type"] = grader_details.get("grader_type")
+                vrec["grader_details"] = grader_details
+                vrec["canonical_class"] = v2_task["canonical_class"]
+            else:
+                kl_value, kl_bool = get_kl_div(
+                    probs=model_probs,
+                    expected_probs=canonical_probs,
+                )
 
-            vrec["kl_value"] = float(kl_value)
+            vrec["kl_value"] = None if kl_value is None else float(kl_value)
             vrec["kl_bool"] = bool(kl_bool)
             vrec["response_output"] = model_probs
             vrec["error"] = None
@@ -215,7 +277,7 @@ def main(
     return results_out
 
 
-def get_qiskit_results(models: List[str], passk: int) -> None:
+def get_qiskit_results(models: List[str], passk: int, benchmark_version: str = "v1") -> None:
     RESPONSES_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     RESULTS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -232,6 +294,7 @@ def get_qiskit_results(models: List[str], passk: int) -> None:
             result_path=result_path,
             canonical_solutions_path=CANONICAL_SOLUTIONS_DIR,
             global_inputs=GLOBAL_INPUTS,
+            benchmark_version=benchmark_version,
         )
         all_results[model_resp_path[1]] = results
 
@@ -245,9 +308,15 @@ if __name__ == "__main__":
         models = DEFAULT_MODELS
         passk = 1
     else:
-        passk = int(sys.argv[-1])
-        models = sys.argv[1:-1]
+        benchmark_version = "v1"
+        args = sys.argv[1:]
+        if "--benchmark-version" in args:
+            idx = args.index("--benchmark-version")
+            benchmark_version = args[idx + 1]
+            del args[idx : idx + 2]
+        passk = int(args[-1])
+        models = args[:-1]
         if not models:
             models = DEFAULT_MODELS
 
-    get_qiskit_results(models, passk=passk)
+    get_qiskit_results(models, passk=passk, benchmark_version=benchmark_version)

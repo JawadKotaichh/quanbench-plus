@@ -42,6 +42,7 @@ dependencies = [
   "cirq-web==1.6.1",
   "qiskit",
   "qiskit-aer",
+  "qiskit-algorithms",
   "pennylane",
 ]
 
@@ -50,6 +51,7 @@ where = ["."]
 include = [
   "canonical_results*",
   "feedback_loop*",
+  "graders*",
   "pass_at_k_pipeline*",
   "prompts*",
   "utils*",

@@ -1,6 +1,7 @@
 from pass_at_k_pipeline.cirq_pip.paths import CIRQ_JSONL
 from pass_at_k_pipeline.pennylane_pip.paths import PENNYLANE_JSONL
 from pass_at_k_pipeline.qiskit_pip.paths import QISKIT_JSONL
+from pass_at_k_pipeline.qiskit_pip.paths import QISKIT_V2_JSONL
 from pass_at_k_pipeline.pennylane_pip.paths import (
     MODEL_RESPONSES_DIR as MODEL_RESPONSES_DIR_PENNYLANE,
 )
@@ -16,6 +17,7 @@ from utils.parse_prompt import parse_prompt
 from utils.get_function_signature_from_prompt import get_function_signature_from_prompt
 from utils.read_jsonl import read_jsonl
 from utils.parse_response import parse_response
+from utils.coda_local import is_coda_model, send_coda_request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from dotenv import load_dotenv
@@ -30,11 +32,14 @@ load_dotenv()
 def send_request(request):
     api_key = os.getenv("API_KEY")
     print("Sending request to", request.get("model"))
-    url = "https://openrouter.ai/api/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     messages = request.get("messages") or []
+    chat_completion = ""
     if len(messages) > 1 and isinstance(messages[1], dict):
         chat_completion = messages[1].get("content") or ""
+    if is_coda_model(request.get("model")):
+        return send_coda_request(request), chat_completion
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     try:
         # print("Request is: ", request)
         response = requests.post(url, json=request, headers=headers)
@@ -52,18 +57,18 @@ def send_request(request):
         return {"error": str(e)}
 
 
-def parse_requests(json_path: str, models: list):
+def parse_requests(json_path: str, models: list, benchmark_version: str = "v1"):
     tasks = read_jsonl(json_path)
     requests = []
     tasks_info = []
     for model in models:
         for task in tasks:
-            chat_completion_part = get_function_signature_from_prompt(
-                task.get("complete_prompt")
-            )
+            prompt = task.get("prompt_v2") if benchmark_version == "v2" else None
+            prompt = prompt or task.get("complete_prompt")
+            chat_completion_part = get_function_signature_from_prompt(prompt)
             requests.append(
                 parse_prompt(
-                    task.get("complete_prompt"),
+                    prompt,
                     chat_completion_part,
                     model,
                     n=1,
@@ -198,11 +203,13 @@ def process_requests_pass_k(requests, tasks_info, pass_k):
     return results
 
 
-def get_jsonl_path(framework: str):
+def get_jsonl_path(framework: str, benchmark_version: str = "v1"):
     if framework == "cirq":
         return CIRQ_JSONL
     elif framework == "pennylane":
         return PENNYLANE_JSONL
+    elif benchmark_version == "v2":
+        return QISKIT_V2_JSONL
     else:
         return QISKIT_JSONL
 
@@ -216,12 +223,14 @@ def get_model_reponses_dir(framework: str):
         return MODEL_RESPONSES_DIR_QISKIT
 
 
-def main(models: list, framework: str, pass_k: int = 1):
+def main(models: list, framework: str, pass_k: int = 1, benchmark_version: str = "v1"):
     all_results: Dict[str, List[Dict[str, Any]]] = {f"{framework}": []}
-    jsonl_path = get_jsonl_path(framework=framework)
+    if benchmark_version == "v2" and framework != "qiskit":
+        raise ValueError("benchmark_version=v2 is currently implemented for qiskit only.")
+    jsonl_path = get_jsonl_path(framework=framework, benchmark_version=benchmark_version)
     model_response_dir = get_model_reponses_dir(framework=framework)
     print("Starting API requests...")
-    requestss, tasks_info = parse_requests(jsonl_path, models)
+    requestss, tasks_info = parse_requests(jsonl_path, models, benchmark_version=benchmark_version)
 
     print(f"   Generated {len(requestss)} requests across {len(models)} models")
     results = process_requests_pass_k(requestss, tasks_info, pass_k)
@@ -264,6 +273,12 @@ if __name__ == "__main__":
         default=1,
         help="Number of samples for pass@k evaluation (default: 1)",
     )
+    parser.add_argument(
+        "--benchmark-version",
+        choices=["v1", "v2"],
+        default="v1",
+        help="Benchmark prompt/scoring version (v2 currently qiskit only).",
+    )
     args = parser.parse_args()
     models = args.models if args.models else DEFAULT_MODELS
-    main(models, args.framework, args.pass_k)
+    main(models, args.framework, args.pass_k, args.benchmark_version)
