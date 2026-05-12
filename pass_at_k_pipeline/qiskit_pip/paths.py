@@ -11,6 +11,7 @@ for path in (REPO_ROOT, PASS_AT_K_DIR):
 
 CANONICAL_SOLUTIONS_DIR = REPO_ROOT / "canonical_results" / "canonical_solutions.json"
 QISKIT_JSONL = str(REPO_ROOT / "prompts" / "qiskit.jsonl")
+QISKIT_V2_JSONL = str(REPO_ROOT / "prompts" / "qiskit_v2.jsonl")
 RESPONSES_OUTPUT_DIR = REPO_ROOT / "responses" / "qiskit" / "pass_at_k_new_models"
 RESULTS_OUTPUT_DIR = REPO_ROOT / "results" / "qiskit" / "pass_at_k_new_models"
 MODEL_RESPONSES_DIR = REPO_ROOT / "model_responses" / "qiskit" / "pass_at_k_new_models"

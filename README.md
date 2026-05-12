@@ -39,6 +39,19 @@ bash pass_at_k_pipeline/runner.sh --framework qiskit --pass_k 5 "openai/gpt-4.1"
 bash pass_at_k_pipeline/runner.sh --framework pennylane --pass_k 5 "openai/gpt-4.1"
 ```
 
+Qiskit v2 deterministic grading:
+
+```bash
+bash pass_at_k_pipeline/runner.sh --framework qiskit --benchmark-version v2 --pass_k 5 "openai/gpt-4.1"
+```
+
+Local Coda agent harness:
+
+```bash
+export CODA_AGENTS_URL=http://127.0.0.1:8000
+bash pass_at_k_pipeline/runner.sh --framework qiskit --benchmark-version v2 --pass_k 1 coda-local
+```
+
 ## 4) Run Feedback-loop pipeline
 
 ```bash
@@ -57,6 +70,8 @@ bash feedback_loop/runner.sh --framework pennylane --feedback_num 5 "openai/gpt-
 ## Notes
 
 - Model names must be OpenRouter IDs (example: `"openai/gpt-4.1"`).
+- `coda`, `coda-local`, and `coda/local` use the local Coda `/agents` SSE harness instead of OpenRouter.
+- `--benchmark-version v2` is currently implemented for Qiskit and uses `prompts/qiskit_v2.jsonl`.
 - Runner scripts require at least one model argument.
 - Use `--help` for CLI options:
   - `bash pass_at_k_pipeline/runner.sh --help`

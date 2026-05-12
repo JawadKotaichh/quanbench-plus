@@ -12,6 +12,7 @@ for path in (REPO_ROOT, PASS_AT_K_DIR):
 
 CANONICAL_SOLUTIONS_DIR = REPO_ROOT / "canonical_results" / "canonical_solutions.json"
 CIRQ_JSONL = str(REPO_ROOT / "prompts" / "cirq.jsonl")
+CIRQ_V2_JSONL = str(REPO_ROOT / "prompts" / "cirq_v2.jsonl")
 RESPONSES_OUTPUT_DIR = REPO_ROOT / "responses" / "cirq" / "pass_at_one_new_models"
 RESULTS_OUTPUT_DIR = REPO_ROOT / "results" / "cirq" / "pass_at_one_new_models"
 MODEL_RESPONSES_DIR = REPO_ROOT / "model_responses" / "cirq" / "pass_at_one_new_models"
