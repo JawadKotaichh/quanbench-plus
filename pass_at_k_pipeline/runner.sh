@@ -8,7 +8,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 
 PIPELINE_DIR="$REPO_ROOT/pass_at_k_pipeline"
-API_SCRIPT="$PIPELINE_DIR/api_pass_at_k.py"
+API_MODULE="pass_at_k_pipeline.api_pass_at_k"
 
 # Sanity: python exists
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
@@ -25,7 +25,7 @@ print_help () {
   echo ""
   echo "  --framework, --lang    One of: cirq | qiskit | pennylane   (default: cirq)"
   echo "  --pass_k               Pass@k samples (default: 1)"
-  echo "  --benchmark-version    One of: v1 | v2 (v2 currently qiskit only; default: v1)"
+  echo "  --benchmark-version    One of: v1 | v2 (default: v1)"
   echo ""
   echo "Examples:"
   echo "  bash $(basename "$0") --framework cirq --pass_k 5 "openai/gpt-4.1""
@@ -67,24 +67,19 @@ fi
 
 case "$FRAMEWORK" in
   cirq)
-    RESULTS_SCRIPT="$PIPELINE_DIR/cirq_pip/get_cirq_results.py"
+    RESULTS_MODULE="pass_at_k_pipeline.cirq_pip.get_cirq_results"
     ;;
   qiskit)
-    RESULTS_SCRIPT="$PIPELINE_DIR/qiskit_pip/get_qiskit_results.py"
+    RESULTS_MODULE="pass_at_k_pipeline.qiskit_pip.get_qiskit_results"
     ;;
   pennylane)
-    RESULTS_SCRIPT="$PIPELINE_DIR/pennylane_pip/get_pennylane_results.py"
+    RESULTS_MODULE="pass_at_k_pipeline.pennylane_pip.get_pennylane_results"
     ;;
   *)
     echo "Error: unknown framework '$FRAMEWORK'. Use: cirq | qiskit | pennylane" >&2
     exit 1
     ;;
 esac
-
-if [[ "$BENCHMARK_VERSION" == "v2" && "$FRAMEWORK" != "qiskit" ]]; then
-  echo "Error: benchmark-version v2 is currently implemented for qiskit only." >&2
-  exit 1
-fi
 
 cd "$REPO_ROOT" || exit 1
 
@@ -98,12 +93,8 @@ for m in "${MODELS[@]}"; do
 done
 echo "---"
 
-"$PYTHON_BIN" "$API_SCRIPT" --framework "$FRAMEWORK" --pass_k "$PASS_K" --benchmark-version "$BENCHMARK_VERSION" "${MODELS[@]}"
-if [[ "$FRAMEWORK" == "qiskit" ]]; then
-  "$PYTHON_BIN" "$RESULTS_SCRIPT" --benchmark-version "$BENCHMARK_VERSION" "${MODELS[@]}" "$PASS_K"
-else
-  "$PYTHON_BIN" "$RESULTS_SCRIPT" "${MODELS[@]}" "$PASS_K"
-fi
+"$PYTHON_BIN" -m "$API_MODULE" --framework "$FRAMEWORK" --pass_k "$PASS_K" --benchmark-version "$BENCHMARK_VERSION" "${MODELS[@]}"
+"$PYTHON_BIN" -m "$RESULTS_MODULE" --benchmark-version "$BENCHMARK_VERSION" "${MODELS[@]}" "$PASS_K"
 
 echo "---"
 echo "All evaluations complete."

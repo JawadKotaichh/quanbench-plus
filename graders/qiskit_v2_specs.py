@@ -8,23 +8,18 @@ import json
 import numpy as np
 from qiskit import QuantumCircuit
 
-from graders.core import GradeContext, grade
-from graders.qiskit_execution import QiskitExecution, execute_qiskit_task
+from graders.contracts import ExecutionResult, GradeContext
+from graders.core import grade
+from graders.qiskit_execution import execute_qiskit_task
+from graders.qiskit_v2_data import (
+    QISKIT_V2_CANONICAL_SOLUTION_OVERRIDES,
+    QISKIT_V2_PROMPT_NOTE,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 QISKIT_V2_JSONL = REPO_ROOT / "prompts" / "qiskit_v2.jsonl"
 QISKIT_JSONL = REPO_ROOT / "prompts" / "qiskit.jsonl"
-
-
-QISKIT_V2_PROMPT_NOTE = """
-
-QuanBench+ v2 grading note:
-- Preserve the exact function signature and return a Qiskit QuantumCircuit.
-- Use Qiskit's native count-key convention: qubit 0 is the least-significant bit.
-- Measure exactly the register requested by the prompt. Do not measure ancillas unless explicitly requested.
-- If the prompt says "without measure", return an unmeasured circuit.
-"""
 
 
 QISKIT_V2_SPECS: dict[str, dict[str, Any]] = {
@@ -121,19 +116,6 @@ QISKIT_V2_SPECS: dict[str, dict[str, Any]] = {
 }
 
 
-QISKIT_V2_CANONICAL_SOLUTION_OVERRIDES: dict[str, str] = {
-    "03": """from qiskit import QuantumCircuit
-
-def grover_3SAT() -> QuantumCircuit:
-    qc = QuantumCircuit(3, 3)
-    qc.x(1)
-    qc.h(2)
-    qc.measure([0, 1, 2], [0, 1, 2])
-    return qc
-""",
-}
-
-
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
@@ -199,9 +181,9 @@ class QiskitV2Evaluator:
     def __init__(self, tasks: dict[str, dict[str, Any]], inputs: dict[str, Any]):
         self.tasks = tasks
         self.inputs = inputs
-        self._canonical_cache: dict[str, QiskitExecution] = {}
+        self._canonical_cache: dict[str, ExecutionResult] = {}
 
-    def _canonical_execution(self, task_id: str) -> QiskitExecution | None:
+    def _canonical_execution(self, task_id: str) -> ExecutionResult | None:
         if task_id in self._canonical_cache:
             return self._canonical_cache[task_id]
         task = self.tasks[task_id]
@@ -228,7 +210,7 @@ class QiskitV2Evaluator:
         self,
         *,
         task_id: str,
-        execution: QiskitExecution,
+        execution: ExecutionResult,
         code: str | None = None,
     ) -> dict[str, Any]:
         task_id = str(task_id).zfill(2)
@@ -249,7 +231,7 @@ class QiskitV2Evaluator:
             ),
         )
 
-    def grade_code(self, *, task_id: str, code: str, entry_point: str) -> tuple[QiskitExecution, dict[str, Any]]:
+    def grade_code(self, *, task_id: str, code: str, entry_point: str) -> tuple[ExecutionResult, dict[str, Any]]:
         execution = execute_qiskit_task(
             task_id=str(task_id).zfill(2),
             code=code,

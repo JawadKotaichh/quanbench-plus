@@ -1,5 +1,6 @@
 """QuanBench+ v2 grading primitives."""
 
-from graders.core import GradeContext, grade
+from graders.contracts import ExecutionResult, GradeContext
+from graders.core import grade
 
-__all__ = ["GradeContext", "grade"]
+__all__ = ["ExecutionResult", "GradeContext", "grade"]

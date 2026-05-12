@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -8,15 +7,8 @@ from qiskit import QuantumCircuit, transpile
 from qiskit_aer import AerSimulator
 from qiskit.quantum_info import Operator, Statevector
 
+from graders.contracts import ExecutionResult
 from utils.common import get_handler
-
-
-@dataclass
-class QiskitExecution:
-    probabilities: list[float]
-    metadata: dict[str, Any]
-    unitary: Any | None = None
-    circuit: QuantumCircuit | None = None
 
 
 def counts_to_array(counts: dict[str, int] | list[dict[str, int]]) -> np.ndarray:
@@ -109,6 +101,9 @@ def circuit_metadata(circuit: QuantumCircuit) -> dict[str, Any]:
         "num_qubits": circuit.num_qubits,
         "num_clbits": circuit.num_clbits,
         "measurement_count": len(pairs),
+        "non_measurement_operation_count": sum(
+            count for name, count in op_counts.items() if name != "measure"
+        ),
         "measurement_pairs": [[q, c] for q, c in pairs],
         "operation_counts": op_counts,
         "entangling_gate_count": entangling,
@@ -122,10 +117,10 @@ def execute_qiskit_task(
     code: str,
     entry_point: str,
     inputs: dict[str, Any],
-) -> QiskitExecution:
+) -> ExecutionResult:
     result = get_handler(task_id, code, entry_point, inputs)
     if isinstance(result, dict):
-        return QiskitExecution(
+        return ExecutionResult(
             probabilities=counts_to_array(result).tolist(),
             metadata={"returned_counts": True},
             unitary=None,
@@ -146,7 +141,7 @@ def execute_qiskit_task(
         probabilities = counts_to_array(counts)
         metadata["probability_method"] = "qasm_fallback"
         metadata["statevector_error"] = f"{type(exc).__name__}: {exc}"
-    return QiskitExecution(
+    return ExecutionResult(
         probabilities=probabilities.tolist(),
         metadata=metadata,
         unitary=circuit_unitary(circuit),

@@ -8,7 +8,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 
 PIPELINE_DIR="$REPO_ROOT/feedback_loop"
-API_SCRIPT="$PIPELINE_DIR/api.py"
+API_MODULE="feedback_loop.api"
 
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   if command -v python >/dev/null 2>&1; then
@@ -24,7 +24,7 @@ print_help () {
   echo ""
   echo "  --framework, --lang    One of: cirq | qiskit | pennylane   (default: cirq)"
   echo "  --feedback_num         Max attempts per task (default: 5)"
-  echo "  --benchmark-version    One of: v1 | v2 (v2 currently qiskit only; default: v1)"
+  echo "  --benchmark-version    One of: v1 | v2 (default: v1)"
   echo ""
   echo "Examples:"
    echo "  bash $(basename "$0") --framework cirq --feedback_num 5 deepseek/deepseek-r1"
@@ -65,9 +65,8 @@ fi
 
 cd "$REPO_ROOT" || exit 1
 
-if [[ "$BENCHMARK_VERSION" == "v2" && "$FRAMEWORK" != "qiskit" ]]; then
-  echo "Error: benchmark-version v2 is currently implemented for qiskit only." >&2
-  exit 1
+if [[ "$BENCHMARK_VERSION" == "v2" ]]; then
+  API_MODULE="feedback_loop.api_v2"
 fi
 
 echo "Configuration:"
@@ -81,7 +80,7 @@ done
 echo "---"
 
 ARGS=( --framework "$FRAMEWORK" --feedback_num "$FEEDBACK_NUM" --benchmark-version "$BENCHMARK_VERSION")
-"$PYTHON_BIN" "$API_SCRIPT" "${ARGS[@]}" "${MODELS[@]}"
+"$PYTHON_BIN" -m "$API_MODULE" "${ARGS[@]}" "${MODELS[@]}"
 
 echo "---"
 echo "Feedback-loop run complete."

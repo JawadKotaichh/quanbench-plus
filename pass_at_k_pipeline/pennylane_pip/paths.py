@@ -11,6 +11,7 @@ for path in (REPO_ROOT, PASS_AT_K_DIR):
 
 CANONICAL_SOLUTIONS_DIR = REPO_ROOT / "canonical_results" / "canonical_solutions.json"
 PENNYLANE_JSONL = str(REPO_ROOT / "prompts" / "pennylane.jsonl")
+PENNYLANE_V2_JSONL = str(REPO_ROOT / "prompts" / "pennylane_v2.jsonl")
 RESPONSES_OUTPUT_DIR = REPO_ROOT / "responses" / "pennylane" / "pass_at_k_new_models"
 RESULTS_OUTPUT_DIR = REPO_ROOT / "results" / "pennylane" / "pass_at_k_new_models"
 MODEL_RESPONSES_DIR = (

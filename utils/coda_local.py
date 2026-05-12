@@ -14,12 +14,7 @@ def is_coda_model(model: str | None) -> bool:
     return (model or "").strip().lower() in CODA_MODEL_ALIASES
 
 
-def send_coda_request(request_payload: dict[str, Any]) -> dict[str, Any]:
-    model = str(request_payload.get("model") or "coda-local")
-    base_url = os.getenv("CODA_AGENTS_URL", "http://127.0.0.1:8000").rstrip("/")
-    timeout = float(os.getenv("CODA_AGENTS_TIMEOUT", "900"))
-    fast = os.getenv("CODA_AGENTS_FAST", "").lower() in {"1", "true", "yes"}
-
+def _messages_from_payload(request_payload: dict[str, Any]) -> list[dict[str, str]]:
     messages = [
         {"role": msg["role"], "content": msg.get("content", "")}
         for msg in request_payload.get("messages", [])
@@ -27,15 +22,24 @@ def send_coda_request(request_payload: dict[str, Any]) -> dict[str, Any]:
     ]
     if not messages:
         raise RuntimeError("Coda local request has no non-empty messages.")
+    return messages
 
-    response = requests.post(
-        f"{base_url}/agents",
-        json={"messages": messages, "mode": "build", "fast": fast},
-        stream=True,
-        timeout=timeout,
-    )
-    response.raise_for_status()
 
+def _error_response(model: str, error_payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "model": model,
+        "error": error_payload,
+        "choices": [
+            {
+                "finish_reason": "error",
+                "message": {"role": "assistant", "content": str(error_payload)},
+            }
+        ],
+        "usage": {},
+    }
+
+
+def _stream_agent_response(response: requests.Response) -> tuple[list[str], dict[str, Any] | None, dict[str, Any] | None]:
     tokens: list[str] = []
     structured_response: dict[str, Any] | None = None
     error_payload: dict[str, Any] | None = None
@@ -56,19 +60,25 @@ def send_coda_request(request_payload: dict[str, Any]) -> dict[str, Any]:
         elif payload_type == "error":
             error_payload = payload
             break
+    return tokens, structured_response, error_payload
 
+
+def send_coda_request(request_payload: dict[str, Any]) -> dict[str, Any]:
+    model = str(request_payload.get("model") or "coda-local")
+    base_url = os.getenv("CODA_AGENTS_URL", "http://127.0.0.1:8000").rstrip("/")
+    timeout = float(os.getenv("CODA_AGENTS_TIMEOUT", "900"))
+    fast = os.getenv("CODA_AGENTS_FAST", "").lower() in {"1", "true", "yes"}
+    response = requests.post(
+        f"{base_url}/agents",
+        json={"messages": _messages_from_payload(request_payload), "mode": "build", "fast": fast},
+        stream=True,
+        timeout=timeout,
+    )
+    response.raise_for_status()
+
+    tokens, structured_response, error_payload = _stream_agent_response(response)
     if error_payload:
-        return {
-            "model": model,
-            "error": error_payload,
-            "choices": [
-                {
-                    "finish_reason": "error",
-                    "message": {"role": "assistant", "content": str(error_payload)},
-                }
-            ],
-            "usage": {},
-        }
+        return _error_response(model, error_payload)
 
     content = "".join(tokens)
     if structured_response:
